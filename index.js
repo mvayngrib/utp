@@ -351,6 +351,33 @@ Server.prototype.listen = function(port, onlistening) {
 	socket.bind(port);
 };
 
+Server.prototype.close = function(cb) {
+	var self = this;
+
+	if (cb) this.once('close', cb);
+
+	var togo = 0;
+	var conns = this._connections;
+	for (var id in this._connections) {
+		var c = this._connections[id];
+		if (c._closed) continue;
+
+		c.once('close', finish);
+		conns[id].destroy();
+		togo++;
+	}
+
+	if (!togo) finish();
+
+	function finish() {
+		if (--togo <= 0) {
+			if (self._socket) self._socket.close();
+
+			self.emit('close');
+		}
+	}
+}
+
 exports.createServer = function(onconnection) {
 	var server = new Server();
 	if (onconnection) server.on('connection', onconnection);
