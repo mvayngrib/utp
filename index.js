@@ -85,6 +85,7 @@ var Connection = function(port, host, socket, syn) {
 	Duplex.call(this);
 	var self = this;
 
+	this.id = Connection.id++
 	this.port = port;
 	this.host = host;
 	this.socket = socket;
@@ -93,6 +94,7 @@ var Connection = function(port, host, socket, syn) {
 	this._incoming = cyclist(BUFFER_SIZE);
 
 	this._inflightPackets = 0;
+	this._ended = false;
 	this._closed = false;
 	this._alive = false;
 
@@ -129,9 +131,23 @@ var Connection = function(port, host, socket, syn) {
 	var resend = setInterval(this._resend.bind(this), 500);
 	var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
 	var tick = 0;
+	var closeTimeout
+	var closedEvents = [];
 
 	var closed = function() {
-		if (++tick === 2) self._closing();
+		tick++;
+		if (tick === 1) {
+			closeTimeout = setTimeout(function() {
+				log(self.id, 'timed out');
+				if (self._ended) closed();
+				else self.emit('end');
+			}, CLOSE_GRACE);
+			// self.once('end', clearTimeout.bind(null, closeTimeout));
+		}
+		else if (tick === 2) {
+			log(self.id, 'closing')
+			self._closing();
+		}
 	};
 
 	var sendFin = function() {
@@ -146,12 +162,30 @@ var Connection = function(port, host, socket, syn) {
 		clearInterval(resend);
 		clearInterval(keepAlive);
 	});
+
 	this.once('end', function() {
+		self._ended = true;
 		process.nextTick(closed);
+	});
+
+	// DEBUG LOGS
+
+	;['end', 'close'].forEach(function(e) {
+		self.on(e, function() {
+			log(self.id, 'r', e);
+		})
+	})
+
+	;['finish', 'flush'].forEach(function(e) {
+		self.on(e, function() {
+			log(self.id, 'w', e);
+		})
 	});
 };
 
 util.inherits(Connection, Duplex);
+
+Connection.id = 0;
 
 Connection.prototype.setTimeout = function() {
 	// TODO: impl me
@@ -159,6 +193,11 @@ Connection.prototype.setTimeout = function() {
 
 Connection.prototype.destroy = function() {
 	this.end();
+};
+
+Connection.prototype.close = function() {
+	debugger;
+	return Duplex.prototype.close.call(this);
 };
 
 Connection.prototype.address = function() {
@@ -232,7 +271,11 @@ Connection.prototype._recvAck = function(ack) {
 	var offset = this._seq - this._inflightPackets;
 	var acked = uint16(ack - offset)+1;
 
-	if (acked >= BUFFER_SIZE) return; // sanity check
+	if (acked >= BUFFER_SIZE) {
+		console.log('insane', ack - offset);
+		return; // sanity check
+		// acked = 1;
+	}
 
 	for (var i = 0; i < acked; i++) {
 		this._outgoing.del(offset+i);
@@ -243,6 +286,7 @@ Connection.prototype._recvAck = function(ack) {
 };
 
 Connection.prototype._recvIncoming = function(packet) {
+	var self = this;
 	if (this._closed) return;
 
 	if (packet.id === PACKET_SYN && this._connecting) {
@@ -278,7 +322,7 @@ Connection.prototype._recvIncoming = function(packet) {
 		this._ack = uint16(this._ack+1);
 
 		if (packet.id === PACKET_DATA) this.push(packet.data);
-		if (packet.id === PACKET_FIN)  this.push(null);
+		if (packet.id === PACKET_FIN) this.push(null);
 	}
 
 	this._sendAck();
@@ -332,6 +376,7 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 		connections[id] = new Connection(rinfo.port, rinfo.address, socket, packet);
 		connections[id].on('close', function() {
 			delete connections[id];
+			self._checkClose();
 		});
 
 		self.emit('connection', connections[id]);
@@ -353,29 +398,49 @@ Server.prototype.listen = function(port, onlistening) {
 
 Server.prototype.close = function(cb) {
 	var self = this;
+	if (this._closed) {
+		if (cb) process.nextTick(cb);
+
+		return;
+	}
 
 	if (cb) this.once('close', cb);
 
-	var togo = 0;
-	var conns = this._connections;
+	if (this._closing) return;
+
+	this._closing = true;
 	for (var id in this._connections) {
-		var c = this._connections[id];
-		if (c._closed) continue;
-
-		c.once('close', finish);
-		conns[id].destroy();
-		togo++;
+		this._connections[id].destroy();
 	}
 
-	if (!togo) finish();
+	this._checkClose();
+}
 
-	function finish() {
-		if (--togo <= 0) {
-			if (self._socket) self._socket.close();
+Server.prototype._checkClose = function() {
+	var self = this;
 
-			self.emit('close');
-		}
+	if (!this._closing) return;
+
+	var togo = Object.keys(this._connections).length;
+	if (!togo) {
+		this._socket.close();
+		this._closed = true;
+		this.emit('close');
 	}
+}
+
+function log() {
+	// if (true) return;
+
+	var args = [].slice.call(arguments);
+	args[0] = repeat('\t', args[0]);
+	console.log.apply(console, args);
+}
+
+function repeat(s, n) {
+	var r = '';
+	while (n--) r+=s;
+	return r;
 }
 
 exports.createServer = function(onconnection) {
@@ -400,3 +465,15 @@ exports.connect = function(port, host) {
 
 	return connection;
 };
+
+// var cs = dgram.createSocket;
+// dgram.createSocket = function() {
+// 	var socket = cs.apply(dgram, arguments);
+// 	var c = socket.close;
+// 	socket.close = function() {
+// 		debugger;
+// 		return c.call(socket);
+// 	}
+
+// 	return socket;
+// }

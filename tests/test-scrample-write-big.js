@@ -30,4 +30,4 @@ socket.on('end', function() {
 	process.exit(0);
 });
 
-setTimeout(process.exit.bind(process, 1), 15000);
+setTimeout(process.exit.bind(process, 1), 50000);
