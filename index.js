@@ -81,13 +81,13 @@ var createPacket = function(connection, id, data) {
 	};
 };
 
-var Connection = function(port, host, socket, syn) {
+var Connection = function(options, socket, syn) {
 	Duplex.call(this);
 	var self = this;
 
 	this.id = Connection.id++
-	this.port = port;
-	this.host = host;
+	this.port = options.port;
+	this.host = options.host;
 	this.socket = socket;
 
 	this._outgoing = cyclist(BUFFER_SIZE);
@@ -125,7 +125,16 @@ var Connection = function(port, host, socket, syn) {
 			self.emit('error', err);
 		});
 
-		socket.bind();
+		var bindOpts = {};
+		if ('localPort' in options) bindOpts.port = options.localPort;
+		if ('localAddress' in options) bindOpts.address = options.localAddress;
+
+		if (Object.keys(bindOpts).length) {
+			socket.bind(bindOpts);
+		}
+		else {
+			socket.bind();
+		}
 	}
 
 	var resend = setInterval(this._resend.bind(this), 500);
@@ -373,7 +382,11 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 		if (connections[id]) return connections[id]._recvIncoming(packet);
 		if (packet.id !== PACKET_SYN) return;
 
-		connections[id] = new Connection(rinfo.port, rinfo.address, socket, packet);
+		connections[id] = new Connection({
+			port: rinfo.port,
+			host: rinfo.address
+		}, socket, packet);
+
 		connections[id].on('close', function() {
 			delete connections[id];
 			self._checkClose();
@@ -449,9 +462,17 @@ exports.createServer = function(onconnection) {
 	return server;
 };
 
-exports.connect = function(port, host) {
+exports.connect = function(options) {
+	if (typeof options === 'number') {
+		options = {
+			port: arguments[0],
+			host: arguments[1]
+		}
+	}
+
+	options.host = options.host || '127.0.0.1';
 	var socket = dgram.createSocket('udp4');
-	var connection = new Connection(port, host || '127.0.0.1', socket, null);
+	var connection = new Connection(options, socket, null);
 
 	socket.on('message', function(message) {
 		if (message.length < MIN_PACKET_SIZE) return;
