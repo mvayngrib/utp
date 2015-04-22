@@ -22,6 +22,11 @@ var CLOSE_GRACE = 5000;
 
 var BUFFER_SIZE = 512;
 
+var SOCKET_OPTS = {
+	type: 'udp4',
+	reuseAddr: true
+}
+
 var uint32 = function(n) {
 	return n >>> 0;
 };
@@ -126,15 +131,8 @@ var Connection = function(options, socket, syn) {
 		});
 
 		var bindOpts = {};
-		if ('localPort' in options) bindOpts.port = options.localPort;
-		if ('localAddress' in options) bindOpts.address = options.localAddress;
-
-		if (Object.keys(bindOpts).length) {
-			socket.bind(bindOpts);
-		}
-		else {
-			socket.bind();
-		}
+		if ('localPort' in options) socket.bind(options.localPort);
+		else socket.bind();
 	}
 
 	var resend = setInterval(this._resend.bind(this), 500);
@@ -404,7 +402,8 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 
 Server.prototype.listen = function(port, onlistening) {
 	if (typeof port === 'object' && typeof port.on === 'function') return this.listenSocket(port, onlistening);
-	var socket = dgram.createSocket('udp4');
+	var socket = dgram.createSocket(SOCKET_OPTS);
+	socket.on('error', this.emit.bind(this, 'error'));
 	this.listenSocket(socket, onlistening);
 	socket.bind(port);
 };
@@ -471,7 +470,7 @@ exports.connect = function(options) {
 	}
 
 	options.host = options.host || '127.0.0.1';
-	var socket = dgram.createSocket('udp4');
+	var socket = dgram.createSocket(SOCKET_OPTS);
 	var connection = new Connection(options, socket, null);
 
 	socket.on('message', function(message) {
