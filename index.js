@@ -3,6 +3,7 @@ var cyclist = require('cyclist');
 var util = require('util');
 var EventEmitter = require('events').EventEmitter;
 var Duplex = require('stream').Duplex;
+var loggy = require('./loggy.js');
 
 var EXTENSION = 0;
 var VERSION   = 1;
@@ -15,6 +16,14 @@ var PACKET_FIN   = 1 << 4;
 var PACKET_STATE = 2 << 4;
 var PACKET_RESET = 3 << 4;
 var PACKET_SYN   = 4 << 4;
+
+var idToType = {
+	0: 'DATA',
+	16: 'FIN',
+	32: 'STATE',
+	48: 'RESET',
+	64: 'SYN'
+}
 
 var MIN_PACKET_SIZE = 20;
 var DEFAULT_WINDOW_SIZE = 1 << 18;
@@ -91,14 +100,16 @@ var Connection = function(options, socket, syn) {
 	var self = this;
 
 	this.id = Connection.id++
-	this.port = options.port;
-	this.host = options.host;
+	this.port = this.remotePort = options.port;
+	this.host = this.remoteAddress = options.host;
+	this.localPort = options.localPort;
+	this.localAddress = options.localAddress;
 	this.socket = socket;
 
 	this._outgoing = cyclist(BUFFER_SIZE);
 	this._incoming = cyclist(BUFFER_SIZE);
 
-	this._inflightPackets = 0;
+	this._curwindow = 0;
 	this._ended = false;
 	this._closed = false;
 	this._alive = false;
@@ -116,12 +127,16 @@ var Connection = function(options, socket, syn) {
 		this._connecting = true;
 		this._recvId = 0; // tmp value for v8 opt
 		this._sendId = 0; // tmp value for v8 opt
-		this._seq = (Math.random() * UINT16) | 0;
+		this._seq = 1;//(Math.random() * UINT16) | 0;
 		this._ack = 0;
 		this._synack = null;
 
 		socket.on('listening', function() {
-			self._recvId = socket.address().port; // using the port gives us system wide clash protection
+			var addr = self.socket.address();
+			self.localPort = addr.port;
+			self.localAddress = addr.address;
+			self._recvId = (Math.random() * UINT16) | 0;
+			// self._recvId = socket.address().port; // using the port gives us system wide clash protection
 			self._sendId = uint16(self._recvId + 1);
 			self._sendOutgoing(createPacket(self, PACKET_SYN, null));
 		});
@@ -134,6 +149,10 @@ var Connection = function(options, socket, syn) {
 		if ('localPort' in options) socket.bind(options.localPort);
 		else socket.bind();
 	}
+
+	socket.on('listening', function() {
+		log(self.id, 'addr', self.localAddress, self.localPort, self.remoteAddress, self.remotePort);
+	})
 
 	var resend = setInterval(this._resend.bind(this), 500);
 	var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
@@ -202,11 +221,6 @@ Connection.prototype.destroy = function() {
 	this.end();
 };
 
-Connection.prototype.close = function() {
-	debugger;
-	return Duplex.prototype.close.call(this);
-};
-
 Connection.prototype.address = function() {
 	return {port:this.port, address:this.host};
 };
@@ -237,7 +251,7 @@ Connection.prototype._writeOnce = function(event, data, enc, callback) {
 };
 
 Connection.prototype._writable = function() {
-	return this._inflightPackets < BUFFER_SIZE-1;
+	return this._curwindow < BUFFER_SIZE-1;
 };
 
 Connection.prototype._payload = function(data) {
@@ -246,7 +260,7 @@ Connection.prototype._payload = function(data) {
 };
 
 Connection.prototype._resend = function() {
-	var offset = this._seq - this._inflightPackets;
+	var offset = this._seq - this._curwindow;
 	var first = this._outgoing.get(offset);
 	if (!first) return;
 
@@ -255,7 +269,7 @@ Connection.prototype._resend = function() {
 
 	if (uint32(first.sent - now) < timeout) return;
 
-	for (var i = 0; i < this._inflightPackets; i++) {
+	for (var i = 0; i < this._curwindow; i++) {
 		var packet = this._outgoing.get(offset+i);
 		if (uint32(packet.sent - now) >= timeout) this._transmit(packet);
 	}
@@ -275,24 +289,24 @@ Connection.prototype._closing = function() {
 // packet handling
 
 Connection.prototype._recvAck = function(ack) {
-	var offset = this._seq - this._inflightPackets;
+	var offset = this._seq - this._curwindow;
 	var acked = uint16(ack - offset)+1;
 
 	if (acked >= BUFFER_SIZE) {
-		console.log('insane', ack - offset);
+		log(this.id, 'insane', ack - offset);
 		return; // sanity check
-		// acked = 1;
 	}
 
 	for (var i = 0; i < acked; i++) {
 		this._outgoing.del(offset+i);
-		this._inflightPackets--;
+		this._curwindow--;
 	}
 
-	if (!this._inflightPackets) this.emit('flush');
+	if (!this._curwindow) this.emit('flush');
 };
 
 Connection.prototype._recvIncoming = function(packet) {
+	log(this.id, 'incoming', idToType[packet.id]);
 	var self = this;
 	if (this._closed) return;
 
@@ -342,11 +356,12 @@ Connection.prototype._sendAck = function() {
 Connection.prototype._sendOutgoing = function(packet) {
 	this._outgoing.put(packet.seq, packet);
 	this._seq = uint16(this._seq + 1);
-	this._inflightPackets++;
+	this._curwindow++;
 	this._transmit(packet);
 };
 
 Connection.prototype._transmit = function(packet) {
+	// console.log('outgoing', idToType[packet.id]);
 	packet.sent = packet.sent === 0 ? packet.timestamp : timestamp();
 	var message = packetToBuffer(packet);
 	this._alive = true;
@@ -377,10 +392,17 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 		var packet = bufferToPacket(message);
 		var id = rinfo.address+':'+(packet.id === PACKET_SYN ? uint16(packet.connection+1) : packet.connection);
 
-		if (connections[id]) return connections[id]._recvIncoming(packet);
+		if (connections[id]) {
+			// if (packet.id === PACKET_SYN) debugger;
+
+			return connections[id]._recvIncoming(packet);
+		}
 		if (packet.id !== PACKET_SYN) return;
 
+		var addr = socket.address();
 		connections[id] = new Connection({
+			localPort: addr.port,
+			localAddress: addr.address,
 			port: rinfo.port,
 			host: rinfo.address
 		}, socket, packet);
@@ -485,6 +507,9 @@ exports.connect = function(options) {
 
 	return connection;
 };
+
+// loggy(Connection.prototype);
+// loggy(Server.prototype);
 
 // var cs = dgram.createSocket;
 // dgram.createSocket = function() {
