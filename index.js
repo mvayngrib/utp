@@ -21,6 +21,7 @@ var DEFAULT_WINDOW_SIZE = 1 << 18;
 var CLOSE_GRACE = 5000;
 
 var BUFFER_SIZE = 512;
+var CID = 0
 
 var uint32 = function(n) {
 	return n >>> 0;
@@ -84,6 +85,7 @@ var createPacket = function(connection, id, data) {
 var Connection = function(port, host, socket, syn) {
 	Duplex.call(this);
 	var self = this;
+	this.id = CID++
 
 	this.port = port;
 	this.host = host;
@@ -229,6 +231,8 @@ Connection.prototype._closing = function() {
 // packet handling
 
 Connection.prototype._recvAck = function(ack) {
+	if (!this._inflightPackets) return
+
 	var offset = this._seq - this._inflightPackets;
 	var acked = uint16(ack - offset)+1;
 
@@ -245,6 +249,7 @@ Connection.prototype._recvAck = function(ack) {
 Connection.prototype._recvIncoming = function(packet) {
 	if (this._closed) return;
 
+	log(this.id, 'incoming', idToType[packet.id]);
 	if (packet.id === PACKET_SYN && this._connecting) {
 		this._transmit(this._synack);
 		return;
@@ -296,6 +301,8 @@ Connection.prototype._sendOutgoing = function(packet) {
 };
 
 Connection.prototype._transmit = function(packet) {
+	if (packet.id in idToType) log(this.id, 'outgoing', idToType[packet.id]);
+
 	packet.sent = packet.sent === 0 ? packet.timestamp : timestamp();
 	var message = packetToBuffer(packet);
 	this._alive = true;
@@ -334,6 +341,7 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 			delete connections[id];
 		});
 
+		log(connections[id].id, 'incoming SYN');
 		self.emit('connection', connections[id]);
 	});
 
@@ -373,3 +381,25 @@ exports.connect = function(port, host) {
 
 	return connection;
 };
+
+function log() {
+	// if (true) return;
+
+	var args = [].slice.call(arguments);
+	args[0] = repeat('    ', args[0]);
+	console.log.apply(console, args);
+}
+
+function repeat(s, n) {
+	var r = '';
+	while (n--) r+=s;
+	return r;
+}
+
+var idToType = {
+	0: 'DATA',
+	16: 'FIN',
+	32: 'STATE',
+	48: 'RESET',
+	64: 'SYN'
+}
