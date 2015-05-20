@@ -3,7 +3,7 @@ var utp = require('./')
 
 var conn = utp.connect({
   port: 12345,
-  address: '54.236.214.150',
+  host: '54.236.214.150',
   localPort: 12345
 })
 
