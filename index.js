@@ -97,6 +97,7 @@ var Connection = function(port, host, socket, syn) {
 	this._incoming = cyclist(BUFFER_SIZE);
 
 	this._inflightPackets = 0;
+	this._ended = false;
 	this._closed = false;
 	this._alive = false;
 
@@ -133,9 +134,19 @@ var Connection = function(port, host, socket, syn) {
 	var resend = setInterval(this._resend.bind(this), 500);
 	var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
 	var tick = 0;
+	var closeTimeout;
 
 	var closed = function() {
-		if (++tick === 2) self._closing();
+		tick++;
+		if (tick === 1) {
+			closeTimeout = setTimeout(function() {
+				if (self._ended) closed();
+				else self.emit('end');
+			}, CLOSE_GRACE);
+		}
+		else if (tick === 2) {
+			self._closing();
+		}
 	};
 
 	var sendFin = function() {
@@ -151,6 +162,7 @@ var Connection = function(port, host, socket, syn) {
 		clearInterval(keepAlive);
 	});
 	this.once('end', function() {
+		self._ended = true;
 		process.nextTick(closed);
 	});
 };
@@ -354,6 +366,33 @@ Server.prototype.listen = function(port, onlistening) {
 	this.listenSocket(socket, onlistening);
 	socket.bind(port);
 };
+
+Server.prototype.close = function(cb) {
+	var self = this;
+
+	if (cb) this.once('close', cb);
+
+	var togo = 0;
+	var conns = this._connections;
+	for (var id in this._connections) {
+		var c = conns[id];
+		if (c._closed) continue;
+
+		c.once('close', finish);
+		c.destroy();
+		togo++;
+	}
+
+	if (!togo) finish();
+
+	function finish() {
+		if (--togo <= 0) {
+			if (self._socket) self._socket.close();
+
+			self.emit('close');
+		}
+	}
+}
 
 exports.createServer = function(onconnection) {
 	var server = new Server();
