@@ -85,12 +85,14 @@ var createPacket = function(connection, id, data) {
 	};
 };
 
-var Connection = function(port, host, socket, syn) {
+var Connection = function(options, socket, syn) {
 	Duplex.call(this);
 	var self = this;
 
-	this.port = port;
-	this.host = host;
+	this.port = this.remotePort = options.port;
+	this.host = this.remoteAddress = options.host;
+	this.localPort = options.localPort;
+	this.localAddress = options.localAddress;
 	this.socket = socket;
 
 	this._outgoing = cyclist(BUFFER_SIZE);
@@ -119,6 +121,9 @@ var Connection = function(port, host, socket, syn) {
 		this._synack = null;
 
 		socket.on('listening', function() {
+			var addr = self.socket.address();
+			self.localPort = addr.port;
+			self.localAddress = addr.address;
 			self._recvId = socket.address().port; // using the port gives us system wide clash protection
 			self._sendId = uint16(self._recvId + 1);
 			self._sendOutgoing(createPacket(self, PACKET_SYN, null));
@@ -128,7 +133,8 @@ var Connection = function(port, host, socket, syn) {
 			self.emit('error', err);
 		});
 
-		socket.bind();
+		if ('localPort' in options) socket.bind(options.localPort);
+		else socket.bind();
 	}
 
 	var resend = setInterval(this._resend.bind(this), 500);
@@ -345,7 +351,14 @@ Server.prototype.listenSocket = function(socket, onlistening) {
 		if (connections[id]) return connections[id]._recvIncoming(packet);
 		if (packet.id !== PACKET_SYN) return;
 
-		connections[id] = new Connection(rinfo.port, rinfo.address, socket, packet);
+		var addr = socket.address();
+		connections[id] = new Connection({
+			localPort: addr.port,
+			localAddress: addr.address,
+			port: rinfo.port,
+			host: rinfo.address
+		}, socket, packet);
+
 		connections[id].on('close', function() {
 			delete connections[id];
 		});
@@ -402,7 +415,19 @@ exports.createServer = function(onconnection) {
 
 exports.connect = function(port, host) {
 	var socket = dgram.createSocket('udp4');
-	var connection = new Connection(port, host || '127.0.0.1', socket, null);
+	var options
+	if (typeof port === 'number') {
+		options = {
+			port: port
+		}
+	}
+	else {
+		options = port
+	}
+
+	options.host = options.host || '127.0.0.1';
+	var socket = dgram.createSocket('udp4');
+	var connection = new Connection(options, socket, null);
 
 	socket.on('message', function(message) {
 		if (message.length < MIN_PACKET_SIZE) return;
