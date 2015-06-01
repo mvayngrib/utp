@@ -30,12 +30,16 @@ var uint16 = function(n) {
 	return n & UINT16;
 };
 
+var hrtime = process.hrtime ?
+	process.hrtime.bind(process) :
+	require('browser-process-hrtime')
+
 var timestamp = function() {
-	var offset = process.hrtime();
+	var offset = hrtime();
 	var then = Date.now() * 1000;
 
 	return function() {
-		var diff = process.hrtime(offset);
+		var diff = hrtime(offset);
 		return uint32(then + 1000000 * diff[0] + ((diff[1] / 1000) | 0));
 	};
 }();

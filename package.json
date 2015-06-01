@@ -4,6 +4,7 @@
   "repository": "git://github.com/mafintosh/utp",
   "description": "utp (micro transport protocol) implementation in node",
   "dependencies": {
+    "browser-process-hrtime": "^0.1.1",
     "cyclist": "~0.1.0"
   },
   "keywords": [
