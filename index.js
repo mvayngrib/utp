@@ -156,6 +156,7 @@ var Connection = function(options, socket, syn) {
 	};
 
 	var sendFin = function() {
+		self._finished = true
 		if (self._connecting) return self.once('connect', sendFin);
 		self._sendOutgoing(createPacket(self, PACKET_FIN, null));
 		self.once('flush', closed);
@@ -222,6 +223,7 @@ Connection.prototype._payload = function(data) {
 };
 
 Connection.prototype._resend = function() {
+	if (this._finished) return
 	var offset = this._seq - this._inflightPackets;
 	var first = this._outgoing.get(offset);
 	if (!first) return;
