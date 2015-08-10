@@ -102,9 +102,12 @@ var Connection = function(options, socket, syn) {
 	this._incoming = cyclist(BUFFER_SIZE);
 
 	this._inflightPackets = 0;
-	this._ended = false;
-	this._closed = false;
 	this._alive = false;
+	this._utpState = {
+		ended: false,
+		closed: false,
+		finished: false
+	}
 
 	if (syn) {
 		this._connecting = false;
@@ -149,7 +152,7 @@ var Connection = function(options, socket, syn) {
 		tick++;
 		if (tick === 1) {
 			closeTimeout = setTimeout(function() {
-				if (self._ended) closed();
+				if (self._utpState.ended) closed();
 				else self.emit('end');
 			}, CLOSE_GRACE);
 		}
@@ -161,7 +164,7 @@ var Connection = function(options, socket, syn) {
 	var sendFin = function() {
 		if (self._connecting) return self.once('connect', sendFin);
 		self._debug('sending FIN')
-		self._finished = true
+		self._utpState.finished = true
 		self._sendOutgoing(createPacket(self, PACKET_FIN, null));
 		self.once('flush', closed);
 	};
@@ -173,11 +176,11 @@ var Connection = function(options, socket, syn) {
 		clearInterval(keepAlive);
 	});
 	this.once('end', function() {
-		self._ended = true;
+		self._utpState.ended = true;
 		process.nextTick(closed);
 	});
 
-	;['finish', 'end', 'close', 'flush'].forEach(function (event) {
+	;['connect', 'finish', 'end', 'close', 'flush'].forEach(function (event) {
 		self.on(event, function () {
 			self._debug(event)
 		})
@@ -188,7 +191,8 @@ util.inherits(Connection, Duplex);
 
 Connection.prototype._debug = function () {
 	var local = this.localPort || '[unknown]'
-	var args = [].concat.apply([local + '->' + this.port], arguments)
+	// var args = [].concat.apply([local + '->' + this.port], arguments)
+	var args = [].concat.apply([local], arguments)
 	return debug.apply(null, args)
 }
 
@@ -239,7 +243,7 @@ Connection.prototype._payload = function(data) {
 };
 
 Connection.prototype._resend = function() {
-	if (this._finished) return
+	if (this._utpState.finished) return
 	var offset = this._seq - this._inflightPackets;
 	var first = this._outgoing.get(offset);
 	if (!first) return;
@@ -256,13 +260,13 @@ Connection.prototype._resend = function() {
 };
 
 Connection.prototype._keepAlive = function() {
-	if (this._alive || this._finished) return this._alive = false;
+	if (this._alive || this._utpState.finished) return this._alive = false;
 	this._sendAck();
 };
 
 Connection.prototype._closing = function() {
-	if (this._closed) return;
-	this._closed = true;
+	if (this._utpState.closed) return;
+	this._utpState.closed = true;
 	process.nextTick(this.emit.bind(this, 'close'));
 };
 
@@ -283,13 +287,15 @@ Connection.prototype._recvAck = function(ack) {
 };
 
 Connection.prototype._recvIncoming = function(packet) {
-	if (this._closed) return;
+	if (this._utpState.closed) return;
 
 	if (packet.id === PACKET_SYN && this._connecting) {
+		this._debug('received SYN')
 		this._transmit(this._synack);
 		return;
 	}
 	if (packet.id === PACKET_RESET) {
+		this._debug('received RESET')
 		this.push(null);
 		this.end();
 		this._closing();
@@ -318,7 +324,10 @@ Connection.prototype._recvIncoming = function(packet) {
 		this._ack = uint16(this._ack+1);
 
 		if (packet.id === PACKET_DATA) this.push(packet.data);
-		if (packet.id === PACKET_FIN)  this.push(null);
+		if (packet.id === PACKET_FIN) {
+			this._debug('received FIN')
+			this.push(null);
+		}
 	}
 
 	this._sendAck();
@@ -407,7 +416,7 @@ Server.prototype.close = function(cb) {
 	var conns = this._connections;
 	for (var id in this._connections) {
 		var c = conns[id];
-		if (c._closed) continue;
+		if (c._utpState.closed) continue;
 
 		c.once('close', finish);
 		c.destroy();
@@ -431,7 +440,7 @@ exports.createServer = function(onconnection) {
 	return server;
 };
 
-exports.connect = function(port, host) {
+exports.connect = function(port, host, onconnect) {
 	var socket = dgram.createSocket('udp4');
 	var options
 	if (typeof port === 'number') {
@@ -443,7 +452,12 @@ exports.connect = function(port, host) {
 		options = port
 	}
 
-	options.host = options.host || '127.0.0.1';
+	if (typeof host === 'function') {
+		onconnect = host
+		host = null
+	}
+
+	options.host = host || options.host || '127.0.0.1';
 	var socket = dgram.createSocket('udp4');
 	var connection = new Connection(options, socket, null);
 
@@ -456,6 +470,10 @@ exports.connect = function(port, host) {
 
 		connection._recvIncoming(packet);
 	});
+
+	if (onconnect) {
+		connection.once('connect', onconnect)
+	}
 
 	return connection;
 };
