@@ -5,7 +5,8 @@
   "description": "utp (micro transport protocol) implementation in node",
   "dependencies": {
     "browser-process-hrtime": "^0.1.1",
-    "cyclist": "~0.1.0"
+    "cyclist": "~0.1.0",
+    "debug": "^2.2.0"
   },
   "keywords": [
     "utp",

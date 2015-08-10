@@ -1,8 +1,10 @@
+
 var dgram = require('dgram');
 var cyclist = require('cyclist');
 var util = require('util');
 var EventEmitter = require('events').EventEmitter;
 var Duplex = require('stream').Duplex;
+var debug = require('debug')('utp')
 
 var EXTENSION = 0;
 var VERSION   = 1;
@@ -86,14 +88,15 @@ var createPacket = function(connection, id, data) {
 };
 
 var Connection = function(options, socket, syn) {
-	Duplex.call(this);
 	var self = this;
+	Duplex.call(this);
 
 	this.port = this.remotePort = options.port;
 	this.host = this.remoteAddress = options.host;
 	this.localPort = options.localPort;
 	this.localAddress = options.localAddress;
 	this.socket = socket;
+	this._debug('new connection: ' + JSON.stringify(options))
 
 	this._outgoing = cyclist(BUFFER_SIZE);
 	this._incoming = cyclist(BUFFER_SIZE);
@@ -156,8 +159,9 @@ var Connection = function(options, socket, syn) {
 	};
 
 	var sendFin = function() {
-		self._finished = true
 		if (self._connecting) return self.once('connect', sendFin);
+		self._debug('sending FIN')
+		self._finished = true
 		self._sendOutgoing(createPacket(self, PACKET_FIN, null));
 		self.once('flush', closed);
 	};
@@ -172,9 +176,21 @@ var Connection = function(options, socket, syn) {
 		self._ended = true;
 		process.nextTick(closed);
 	});
+
+	;['finish', 'end', 'close', 'flush'].forEach(function (event) {
+		self.on(event, function () {
+			self._debug(event)
+		})
+	})
 };
 
 util.inherits(Connection, Duplex);
+
+Connection.prototype._debug = function () {
+	var local = this.localPort || '[unknown]'
+	var args = [].concat.apply([local + '->' + this.port], arguments)
+	return debug.apply(null, args)
+}
 
 Connection.prototype.setTimeout = function() {
 	// TODO: impl me
