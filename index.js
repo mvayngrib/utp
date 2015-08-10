@@ -245,7 +245,7 @@ Connection.prototype._payload = function(data) {
 };
 
 Connection.prototype._resend = function() {
-	if (this._utpState.finished) return
+	// if (this._utpState.finished) return
 	var offset = this._seq - this._inflightPackets;
 	var first = this._outgoing.get(offset);
 	if (!first) return;
@@ -262,7 +262,7 @@ Connection.prototype._resend = function() {
 };
 
 Connection.prototype._keepAlive = function() {
-	if (this._alive || this._utpState.finished) return this._alive = false;
+	if (this._alive) return this._alive = false;
 	this._sendAck();
 };
 
