@@ -3,7 +3,7 @@ var dgram = require('dgram');
 var cyclist = require('cyclist');
 var util = require('util');
 var EventEmitter = require('events').EventEmitter;
-var Duplex = require('stream').Duplex;
+var Duplex = require('readable-stream').Duplex;
 var debug = require('debug')('utp')
 
 var EXTENSION = 0;
