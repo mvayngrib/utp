@@ -89,7 +89,9 @@ var createPacket = function(connection, id, data) {
 
 var Connection = function(options, socket, syn) {
 	var self = this;
-	Duplex.call(this);
+	Duplex.call(this, {
+		allowHalfOpen: false
+	});
 
 	this.port = this.remotePort = options.port;
 	this.host = this.remoteAddress = options.host;
