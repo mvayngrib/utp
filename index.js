@@ -170,11 +170,9 @@ var Connection = function(options, socket, syn) {
 
 	this.once('end', function() {
 		self._utpState.ended = true;
-		process.nextTick(function () {
-			if (!checkClose()) {
-				self.destroy()
-			}
-		})
+		if (!checkClose()) {
+			self.destroy()
+		}
 	});
 
 	function checkClose () {
@@ -205,6 +203,8 @@ Connection.prototype.end = function () {
 }
 
 Connection.prototype.push = function (chunk) {
+	if (this._utpState.ended) return
+
 	if (chunk === null) {
 		this._utpState.ended = true
 		this.resume() // make sure 'end' gets emitted
@@ -339,8 +339,6 @@ Connection.prototype._recvAck = function(ack) {
 };
 
 Connection.prototype._recvIncoming = function(packet) {
-	if (this._utpState.closed) return;
-
 	if (packet.id === PACKET_SYN && this._connecting) {
 		this._debug('received SYN')
 		this._transmit(this._synack);
