@@ -3,7 +3,9 @@ var dgram = require('dgram');
 var cyclist = require('cyclist');
 var util = require('util');
 var EventEmitter = require('events').EventEmitter;
-var Duplex = require('readable-stream').Duplex;
+var stream = require('readable-stream')
+var Duplex = stream.Duplex;
+var Writable = stream.Writable;
 var debug = require('debug')('utp')
 
 var EXTENSION = 0;
@@ -93,6 +95,7 @@ var Connection = function(options, socket, syn) {
 		allowHalfOpen: false
 	});
 
+	this._isServerSide = !!syn
 	this.port = this.remotePort = options.port;
 	this.host = this.remoteAddress = options.host;
 	this.localPort = options.localPort;
@@ -145,56 +148,50 @@ var Connection = function(options, socket, syn) {
 		else socket.bind();
 	}
 
-	var resend = setInterval(this._resend.bind(this), 500);
-	var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
-	var tick = 0;
-	var closeTimeout;
-
-	var closed = function() {
-		tick++;
-		if (tick === 1) {
-			closeTimeout = setTimeout(function() {
-				if (self._utpState.ended) closed();
-				else self.emit('end');
-			}, CLOSE_GRACE);
-		}
-		else if (tick === 2) {
-			self._closing();
-		}
-	};
-
-	var sendFin = function() {
-		if (self._connecting) return self.once('connect', sendFin);
-		self._debug('sending FIN')
-		self._utpState.finished = true
-		self._sendOutgoing(createPacket(self, PACKET_FIN, null));
-		self.once('flush', closed);
-	};
-
-	this.once('finish', sendFin);
-	this.once('close', function() {
-		if (!syn) setTimeout(socket.close.bind(socket), CLOSE_GRACE);
-		clearInterval(resend);
-		clearInterval(keepAlive);
-	});
-	this.once('end', function() {
-		self._utpState.ended = true;
-		process.nextTick(closed);
-	});
-
 	;['connect', 'finish', 'end', 'close', 'flush'].forEach(function (event) {
 		self.on(event, function () {
 			self._debug(event)
 		})
 	})
+
+	var resend = setInterval(this._resend.bind(this), 500);
+	var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
+	var togoBeforeClose = 2
+	this.once('finish', function () {
+		self._utpState.finished = true
+		checkClose()
+	});
+
+	this.once('close', function() {
+		if (!syn) socket.close()
+		clearInterval(resend);
+		clearInterval(keepAlive);
+	});
+
+	this.once('end', function() {
+		self._utpState.ended = true;
+		process.nextTick(function () {
+			if (!checkClose()) {
+				self.destroy()
+			}
+		})
+	});
+
+	function checkClose () {
+		if (--togoBeforeClose === 0) {
+			self._closing()
+			return true
+		}
+	}
 };
 
 util.inherits(Connection, Duplex);
 
 Connection.prototype._debug = function () {
+	var side = this._isServerSide ? 'server' : 'client'
 	var local = this.localPort || '[unknown]'
 	// var args = [].concat.apply([local + '->' + this.port], arguments)
-	var args = [].concat.apply([local], arguments)
+	var args = [].concat.apply([side, local], arguments)
 	return debug.apply(null, args)
 }
 
@@ -202,8 +199,60 @@ Connection.prototype.setTimeout = function() {
 	// TODO: impl me
 };
 
+Connection.prototype.end = function () {
+	// TODO: handle [chunk][, encoding][, callback]
+	this.destroy()
+}
+
+Connection.prototype.push = function (chunk) {
+	if (chunk === null) {
+		this._utpState.ended = true
+		this.resume() // make sure 'end' gets emitted
+	}
+
+	return Duplex.prototype.push.apply(this, arguments)
+}
+
 Connection.prototype.destroy = function() {
-	this.end();
+	var self = this
+
+	if (this._destroyed) return// throw new Error('already destroyed')
+
+	this._destroyed = true
+
+	if (this._connecting) {
+		this.once('connect', destroy)
+		timeout = setTimeout(destroy, CLOSE_GRACE)
+	} else {
+		destroy()
+	}
+
+	function destroy () {
+		clearTimeout(self._timeout)
+		// 'finish' event has fired already
+		// meaning we already sent PACKET_FIN
+		if (self._utpState.finished) return
+
+		self._debug('sending FIN')
+		self._sendOutgoing(createPacket(self, PACKET_FIN, null));
+		self.once('flush', function () {
+			if (!self._utpState.finished) {
+				Duplex.prototype.end.call(self)
+			}
+		});
+
+		self._timeout = setTimeout(function () {
+			if (!self._utpState.finished) {
+				self._debug('timed out, emitting \'finish\'')
+				self.emit('finish')
+			}
+
+			if (!self._utpState.ended) {
+				self._debug('timed out, emitting \'end\'')
+				self.emit('end')
+			}
+		}, CLOSE_GRACE)
+	}
 };
 
 Connection.prototype.address = function() {
@@ -267,6 +316,7 @@ Connection.prototype._keepAlive = function() {
 };
 
 Connection.prototype._closing = function() {
+	clearTimeout(this._timeout)
 	if (this._utpState.closed) return;
 	this._utpState.closed = true;
 	process.nextTick(this.emit.bind(this, 'close'));
