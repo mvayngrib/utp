@@ -222,13 +222,13 @@ Connection.prototype.destroy = function() {
 
   if (this._connecting) {
     this.once('connect', destroy)
-    timeout = setTimeout(destroy, CLOSE_GRACE)
+    this._timeout = setTimeout(destroy, CLOSE_GRACE)
   } else {
     destroy()
   }
 
   function destroy () {
-    clearTimeout(self._timeout)
+    clearTimeout(self._closeTimeout)
     // 'finish' event has fired already
     // meaning we already sent PACKET_FIN
     if (self._utpState.finished) return
@@ -241,7 +241,7 @@ Connection.prototype.destroy = function() {
       }
     });
 
-    self._timeout = setTimeout(function () {
+    self._closeTimeout = setTimeout(function () {
       if (!self._utpState.finished) {
         self._debug('timed out, emitting \'finish\'')
         self.emit('finish')
@@ -316,7 +316,7 @@ Connection.prototype._keepAlive = function() {
 };
 
 Connection.prototype._closing = function() {
-  clearTimeout(this._timeout)
+  clearTimeout(this._closeTimeout)
   if (this._utpState.closed) return;
   this._utpState.closed = true;
   process.nextTick(this.emit.bind(this, 'close'));
