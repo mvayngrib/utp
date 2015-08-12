@@ -488,6 +488,7 @@ Server.prototype.close = function(cb) {
   }
 }
 
+exports.isUTP = true
 exports.Server = Server
 
 exports.createServer = function(onconnection) {
