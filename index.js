@@ -208,6 +208,7 @@ Connection.prototype.push = function (chunk) {
   return Duplex.prototype.push.apply(this, arguments)
 }
 
+Connection.prototype.destroy =
 Connection.prototype.end = function () {
   // TODO: handle [chunk][, encoding][, callback]
   var self = this
@@ -260,6 +261,7 @@ Connection.prototype._read = function() {
 };
 
 Connection.prototype._write = function(data, enc, callback) {
+  if (this._utpState.closed) return
   if (this._connecting) return this._writeOnce('connect', data, enc, callback);
 
   while (this._writable()) {
@@ -316,11 +318,13 @@ Connection.prototype._keepAlive = function() {
  * 	Ensures that no more I/O activity happens on this socket.
  * 	Only necessary in case of errors (parse error or so).
  */
-Connection.prototype.destroy =
 Connection.prototype._closing = function() {
   clearTimeout(this._closeTimeout)
   if (this._utpState.closed) return;
+
   this._utpState.closed = true;
+  this._utpState.ended = true;
+  this._utpState.finished = true;
   process.nextTick(this.emit.bind(this, 'close'));
 };
 
