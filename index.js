@@ -402,10 +402,12 @@ Connection.prototype._transmit = function(packet) {
 };
 
 
-var Server = function() {
+var Server = function (onconnection) {
+	if (!(this instanceof Server)) return new Server(onconnection)
 	EventEmitter.call(this);
 	this._socket = null;
 	this._connections = {};
+	if (onconnection) this.on('connection', onconnection);
 };
 
 util.inherits(Server, EventEmitter);
@@ -484,12 +486,13 @@ Server.prototype.close = function(cb) {
 	}
 }
 
+exports.Server = Server
+
 exports.createServer = function(onconnection) {
-	var server = new Server();
-	if (onconnection) server.on('connection', onconnection);
-	return server;
+	return new Server(onconnection);
 };
 
+exports.createConnection =
 exports.connect = function(port, host, onconnect) {
 	var socket = dgram.createSocket('udp4');
 	var options
