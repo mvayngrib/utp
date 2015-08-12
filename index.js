@@ -163,7 +163,7 @@ var Connection = function(options, socket, syn) {
   });
 
   this.once('close', function() {
-    if (!syn) socket.close()
+    if (!self._isServerSide) socket.close()
     clearInterval(resend);
     clearInterval(keepAlive);
   });
@@ -171,7 +171,7 @@ var Connection = function(options, socket, syn) {
   this.once('end', function() {
     self._utpState.ended = true;
     if (!checkClose()) {
-      self.destroy()
+      self.end()
     }
   });
 
@@ -197,11 +197,6 @@ Connection.prototype.setTimeout = function() {
   // TODO: impl me
 };
 
-Connection.prototype.end = function () {
-  // TODO: handle [chunk][, encoding][, callback]
-  this.destroy()
-}
-
 Connection.prototype.push = function (chunk) {
   if (this._utpState.ended) return
 
@@ -213,21 +208,22 @@ Connection.prototype.push = function (chunk) {
   return Duplex.prototype.push.apply(this, arguments)
 }
 
-Connection.prototype.destroy = function() {
+Connection.prototype.end = function () {
+  // TODO: handle [chunk][, encoding][, callback]
   var self = this
 
-  if (this._destroyed) return// throw new Error('already destroyed')
+  if (this._ending) return// throw new Error('already destroyed')
 
-  this._destroyed = true
+  this._ending = true
 
   if (this._connecting) {
-    this.once('connect', destroy)
-    this._timeout = setTimeout(destroy, CLOSE_GRACE)
+    this.once('connect', end)
+    this._timeout = setTimeout(end, CLOSE_GRACE)
   } else {
-    destroy()
+    end()
   }
 
-  function destroy () {
+  function end () {
     clearTimeout(self._closeTimeout)
     // 'finish' event has fired already
     // meaning we already sent PACKET_FIN
@@ -315,6 +311,12 @@ Connection.prototype._keepAlive = function() {
   this._sendAck();
 };
 
+
+/**
+ * 	Ensures that no more I/O activity happens on this socket.
+ * 	Only necessary in case of errors (parse error or so).
+ */
+Connection.prototype.destroy =
 Connection.prototype._closing = function() {
   clearTimeout(this._closeTimeout)
   if (this._utpState.closed) return;
@@ -471,7 +473,7 @@ Server.prototype.close = function(cb) {
     if (c._utpState.closed) continue;
 
     c.once('close', finish);
-    c.destroy();
+    c.end();
     togo++;
   }
 
