@@ -135,7 +135,8 @@ var Connection = function(options, socket, syn) {
       var addr = self.socket.address();
       self.localPort = addr.port;
       self.localAddress = addr.address;
-      self._recvId = socket.address().port; // using the port gives us system wide clash protection
+      // self._recvId = socket.address().port; // using the port gives us system wide clash protection
+      self._recvId = Math.random() * UINT16 | 0;
       self._sendId = uint16(self._recvId + 1);
       self._sendOutgoing(createPacket(self, PACKET_SYN, null));
     });
