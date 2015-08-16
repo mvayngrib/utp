@@ -25,6 +25,8 @@ var DEFAULT_WINDOW_SIZE = 1 << 18;
 var CLOSE_GRACE = 5000;
 
 var BUFFER_SIZE = 512;
+var RECV_ID = 0;
+var RECV_IDS = [];
 
 var uint32 = function(n) {
   return n >>> 0;
@@ -89,6 +91,16 @@ var createPacket = function(connection, id, data) {
   };
 };
 
+var nonRepeatRandom = function () {
+  var rand
+  do {
+    rand = Math.random() * UINT16 | 0
+  } while (RECV_IDS.indexOf(rand) !== -1)
+
+  RECV_IDS.push(rand)
+  return rand
+}
+
 var Connection = function(options, socket, syn) {
   var self = this;
   Duplex.call(this, {
@@ -114,7 +126,7 @@ var Connection = function(options, socket, syn) {
     finished: false
   }
 
-  if (syn) {
+  if (this._isServerSide) {
     this._connecting = false;
     this._recvId = uint16(syn.connection+1);
     this._sendId = syn.connection;
@@ -136,7 +148,7 @@ var Connection = function(options, socket, syn) {
       self.localPort = addr.port;
       self.localAddress = addr.address;
       // self._recvId = socket.address().port; // using the port gives us system wide clash protection
-      self._recvId = Math.random() * UINT16 | 0;
+      self._recvId = nonRepeatRandom();
       self._sendId = uint16(self._recvId + 1);
       self._sendOutgoing(createPacket(self, PACKET_SYN, null));
     });
@@ -175,6 +187,10 @@ var Connection = function(options, socket, syn) {
       self.end()
     }
   });
+
+  this.once('close', function () {
+    RECV_IDS.splice(RECV_IDS.indexOf(self._recvId), 1)
+  })
 
   function checkClose () {
     if (--togoBeforeClose === 0) {
@@ -316,8 +332,8 @@ Connection.prototype._keepAlive = function() {
 
 
 /**
- * 	Ensures that no more I/O activity happens on this socket.
- * 	Only necessary in case of errors (parse error or so).
+ *  Ensures that no more I/O activity happens on this socket.
+ *  Only necessary in case of errors (parse error or so).
  */
 Connection.prototype._closing = function() {
   clearTimeout(this._closeTimeout)
@@ -493,6 +509,8 @@ Server.prototype.close = function(cb) {
   }
 }
 
+exports.packetToBuffer = packetToBuffer
+exports.bufferToPacket = bufferToPacket
 exports.isUTP = true
 exports.Server = Server
 
