@@ -7,6 +7,7 @@ var stream = require('readable-stream')
 var Duplex = stream.Duplex;
 var Writable = stream.Writable;
 var debug = require('debug')('utp')
+var BitArray = require('./bit-array')
 
 var EXTENSION = 0;
 var VERSION   = 1;
@@ -25,8 +26,7 @@ var DEFAULT_WINDOW_SIZE = 1 << 18;
 var CLOSE_GRACE = 5000;
 
 var BUFFER_SIZE = 512;
-var RECV_ID = 0;
-var RECV_IDS = [];
+var RECV_IDS = BitArray(UINT16);
 
 var uint32 = function(n) {
   return n >>> 0;
@@ -95,9 +95,9 @@ var nonRepeatRandom = function () {
   var rand
   do {
     rand = Math.random() * UINT16 | 0
-  } while (RECV_IDS.indexOf(rand) !== -1)
+  } while (RECV_IDS.get(rand))
 
-  RECV_IDS.push(rand)
+  RECV_IDS.set(rand, 1)
   return rand
 }
 
@@ -149,6 +149,10 @@ var Connection = function(options, socket, syn) {
       self.localAddress = addr.address;
       // self._recvId = socket.address().port; // using the port gives us system wide clash protection
       self._recvId = nonRepeatRandom();
+      self.once('close', function () {
+        RECV_IDS.set(self._recvId, 0)
+      })
+
       self._sendId = uint16(self._recvId + 1);
       self._sendOutgoing(createPacket(self, PACKET_SYN, null));
     });
@@ -187,10 +191,6 @@ var Connection = function(options, socket, syn) {
       self.end()
     }
   });
-
-  this.once('close', function () {
-    RECV_IDS.splice(RECV_IDS.indexOf(self._recvId), 1)
-  })
 
   function checkClose () {
     if (--togoBeforeClose === 0) {
