@@ -148,6 +148,7 @@ var Connection = function(options, socket, syn) {
       self.localPort = addr.port;
       self.localAddress = addr.address;
       // self._recvId = socket.address().port; // using the port gives us system wide clash protection
+      // with socket multiplexing, this needs to be unique
       self._recvId = nonRepeatRandom();
       self.once('close', function () {
         RECV_IDS.set(self._recvId, 0)
