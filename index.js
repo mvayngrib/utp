@@ -521,7 +521,6 @@ exports.createServer = function(onconnection) {
 
 exports.createConnection =
 exports.connect = function(port, host, onconnect) {
-  var socket = dgram.createSocket('udp4');
   var options
   if (typeof port === 'number') {
     options = {
