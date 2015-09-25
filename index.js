@@ -1,4 +1,5 @@
 
+var safe = require('safecb')
 var dgram = require('dgram');
 var cyclist = require('cyclist');
 var util = require('util');
@@ -172,6 +173,15 @@ var Connection = function(options, socket, syn) {
     })
   })
 
+  socket._utp = this
+  socket.once('close', function () {
+    if (!self._utpState.closed) {
+      console.warn('utp socket closed from the outside, unsafe')
+      self._socketClosed = true
+      self._closing()
+    }
+  })
+
   var resend = setInterval(this._resend.bind(this), 500);
   var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
   var togoBeforeClose = 2
@@ -181,7 +191,10 @@ var Connection = function(options, socket, syn) {
   });
 
   this.once('close', function() {
-    if (!self._isServerSide) socket.close()
+    if (!self._isServerSide && !self._socketClosed) {
+      socket.close()
+    }
+
     clearInterval(resend);
     clearInterval(keepAlive);
   });
@@ -227,13 +240,34 @@ Connection.prototype.push = function (chunk) {
 }
 
 Connection.prototype.destroy =
-Connection.prototype.end = function () {
-  // TODO: handle [chunk][, encoding][, callback]
+Connection.prototype.end = function (data, enc, cb) {
+  // TODO: handle [chunk][, encoding][, cb]
   var self = this
 
-  if (this._ending) return// throw new Error('already destroyed')
+  if (typeof data === 'function') {
+    cb = data
+    data = enc = null
+  } else if (typeof enc === 'function') {
+    cb = enc
+    enc = null
+  }
 
-  this._ending = true
+  cb = safe(cb)
+  this.once('finish', cb)
+
+  if (data) {
+    return this.write(data, enc, function () {
+      self._debug('ending after write')
+      self.end(cb)
+    })
+  }
+
+  if (this._finishing) {
+    // throw new Error('already destroyed')
+    return
+  }
+
+  this._finishing = true
 
   if (this._connecting) {
     this.once('connect', end)
@@ -441,16 +475,20 @@ Server.prototype.address = function() {
 };
 
 Server.prototype.listenSocket = function(socket, onlistening) {
+  var self = this;
   this._socket = socket;
 
   var connections = this._connections;
-  var self = this;
 
   socket.on('message', function(message, rinfo) {
     if (message.length < MIN_PACKET_SIZE) return;
-    var packet = bufferToPacket(message);
-    var id = rinfo.address+':'+(packet.id === PACKET_SYN ? uint16(packet.connection+1) : packet.connection);
 
+    var packet = bufferToPacket(message);
+    if (self._closing && packet.id !== PACKET_FIN && packet.id !== PACKET_STATE) {
+      return;
+    }
+
+    var id = rinfo.address+':'+(packet.id === PACKET_SYN ? uint16(packet.connection+1) : packet.connection);
     if (connections[id]) return connections[id]._recvIncoming(packet);
     if (packet.id !== PACKET_SYN) return;
 
@@ -487,6 +525,9 @@ Server.prototype.close = function(cb) {
   var self = this;
 
   if (cb) this.once('close', cb);
+  if (this._closing) return
+
+  this._closing = true
 
   var togo = 0;
   var conns = this._connections;
