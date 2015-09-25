@@ -114,7 +114,7 @@ var Connection = function(options, socket, syn) {
   this.localPort = options.localPort;
   this.localAddress = options.localAddress;
   this.socket = socket;
-  this._debug('new connection: ' + JSON.stringify(options))
+  this._debug('new connection to ' + this.host + ':' + this.port)
 
   this._outgoing = cyclist(BUFFER_SIZE);
   this._incoming = cyclist(BUFFER_SIZE);
