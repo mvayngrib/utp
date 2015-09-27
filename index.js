@@ -460,11 +460,18 @@ Connection.prototype._transmit = function(packet) {
 };
 
 
-var Server = function (onconnection) {
-  if (!(this instanceof Server)) return new Server(onconnection)
+var Server = function (opts, onconnection) {
+  if (!(this instanceof Server)) return new Server(opts, onconnection)
+  if (typeof opts === 'function') {
+    onconnection = opts
+    opts = null
+  }
+
   EventEmitter.call(this);
   this._socket = null;
   this._connections = {};
+
+  // doesn't support opts (allowHalfOpen, pauseOnConnect) at the moment
   if (onconnection) this.on('connection', onconnection);
 };
 
