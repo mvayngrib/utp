@@ -519,6 +519,8 @@ Server.prototype.listenSocket = function(socket, onlistening) {
   });
 
   if (onlistening) self.once('listening', onlistening);
+
+  return this
 }
 
 Server.prototype.listen = function(port, onlistening) {
@@ -526,6 +528,7 @@ Server.prototype.listen = function(port, onlistening) {
   var socket = dgram.createSocket('udp4');
   this.listenSocket(socket, onlistening);
   socket.bind(port);
+  return this
 };
 
 Server.prototype.close = function(cb) {
