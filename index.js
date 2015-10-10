@@ -163,8 +163,10 @@ var Connection = function(options, socket, syn) {
       self.emit('error', err);
     });
 
-    if ('localPort' in options) socket.bind(options.localPort);
-    else socket.bind();
+    if (!options.socket) {
+      if ('localPort' in options) socket.bind(options.localPort);
+      else socket.bind();
+    }
   }
 
   ;['connect', 'finish', 'end', 'close', 'flush'].forEach(function (event) {
@@ -588,7 +590,7 @@ exports.connect = function(port, host, onconnect) {
   }
 
   options.host = host || options.host || '127.0.0.1';
-  var socket = dgram.createSocket('udp4');
+  var socket = options.socket || dgram.createSocket('udp4');
   var connection = new Connection(options, socket, null);
 
   socket.on('message', function(message) {
