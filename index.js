@@ -25,6 +25,8 @@ var PACKET_SYN   = 4 << 4;
 var MIN_PACKET_SIZE = 20;
 var DEFAULT_WINDOW_SIZE = 1 << 18;
 var CLOSE_GRACE = 5000;
+var KEEP_ALIVE_INTERVAL = 10*1000;
+var RESEND_INTERVAL = 500;
 
 var BUFFER_SIZE = 512;
 var RECV_IDS = BitArray(UINT16);
@@ -184,8 +186,8 @@ var Connection = function(options, socket, syn) {
     }
   })
 
-  var resend = setInterval(this._resend.bind(this), 500);
-  var keepAlive = setInterval(this._keepAlive.bind(this), 10*1000);
+  var resend = setInterval(this._resend.bind(this), RESEND_INTERVAL);
+  var keepAlive = setInterval(this._keepAlive.bind(this), KEEP_ALIVE_INTERVAL);
   var togoBeforeClose = 2
   this.once('finish', function () {
     self._utpState.finished = true
