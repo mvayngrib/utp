@@ -231,7 +231,7 @@ Connection.prototype._debug = function () {
 Connection.prototype.setTimeout = function(millis, cb) {
   var self = this
 
-  clearTimeout(this._idleTimeout)
+  this._clearIdleTimeout()
   if (!millis) return
 
   this._idleTimeoutMillis = millis

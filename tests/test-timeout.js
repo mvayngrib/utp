@@ -15,8 +15,10 @@ utp.createServer(function(socket) {
 }).listen(53454)
 
 var socket = utp.connect(53454)
+socket._recvIncoming = function () {}
 socket.setTimeout(500, ontimeout)
 socket.once('timeout', ontimeout)
+
 socket.resume()
 socket.write(new Buffer('yo'))
 
