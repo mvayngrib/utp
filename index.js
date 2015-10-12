@@ -226,9 +226,30 @@ Connection.prototype._debug = function () {
   return debug.apply(null, args)
 }
 
-Connection.prototype.setTimeout = function() {
-  // TODO: impl me
+Connection.prototype.setTimeout = function(millis, cb) {
+  var self = this
+
+  clearTimeout(this._idleTimeout)
+  if (!millis) return
+
+  this._idleTimeoutMillis = millis
+  this._idleTimeout = setTimeout(function () {
+    self._clearIdleTimeout()
+    self.emit('timeout', millis)
+  }, millis)
+
+  if (this._idleTimeout.unref) {
+    this._idleTimeout.unref()
+  }
+
+  if (cb) this.once('timeout', cb)
 };
+
+Connection.prototype._clearIdleTimeout = function () {
+  clearTimeout(this._idleTimeout)
+  delete this._idleTimeout
+  delete this._idleTimeoutMillis
+}
 
 Connection.prototype.push = function (chunk) {
   if (this._utpState.ended) return
@@ -399,6 +420,10 @@ Connection.prototype._recvAck = function(ack) {
 };
 
 Connection.prototype._recvIncoming = function(packet) {
+  if ('_idleTimeout' in this) {
+    this.setTimeout(this._idleTimeoutMillis)
+  }
+
   if (packet.id === PACKET_SYN && this._connecting) {
     this._debug('received SYN')
     this._transmit(this._synack);
