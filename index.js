@@ -104,14 +104,14 @@ var nonRepeatRandom = function () {
   return rand
 }
 
-var CID = 0
 var Connection = function(options, socket, syn) {
   var self = this;
-  this.id = CID++
+
   Duplex.call(this, {
     allowHalfOpen: false
   });
 
+  this.setMaxListeners(0)
   this._isServerSide = !!syn
   this.port = this.remotePort = options.port;
   this.host = this.remoteAddress = options.host;
@@ -226,7 +226,7 @@ Connection.prototype._debug = function () {
   var side = this._isServerSide ? 'server' : 'client'
   var local = this.localPort || '[unknown]'
   // var args = [].concat.apply([local + '->' + this.port], arguments)
-  var args = [].concat.apply([this.id, side, local], arguments)
+  var args = [].concat.apply([side, local], arguments)
   return debug.apply(null, args)
 }
 
@@ -339,23 +339,37 @@ Connection.prototype._read = function() {
   // do nothing...
 };
 
-Connection.prototype._trackDelivery = function (data, callback) {
+Connection.prototype._getWriteCallback = function (onsent, ondelivered) {
   var self = this
-  var orig = data
 
   return function () {
     var inflight = self._inflightPackets
     self.on('acked', onAcked)
-    return callback.apply(this, arguments)
+    if (onsent) return onsent.apply(this, arguments)
 
     function onAcked (numAcked) {
       inflight -= numAcked
       if (inflight <= 0) {
         self.removeListener('acked', onAcked)
         self.emit('delivered')
+        if (ondelivered) deliveryCallback()
       }
     }
   }
+}
+
+Connection.prototype.write = function (data, enc, callback, ondelivered) {
+  var args = [data]
+  if (typeof enc === 'function') {
+    ondelivered = callback
+    callback = enc
+  } else {
+    args.push(enc)
+  }
+
+  callback = this._getWriteCallback(callback, ondelivered)
+  args.push(callback)
+  return Duplex.prototype.write.apply(this, args)
 }
 
 Connection.prototype._write = function(data, enc, callback) {
@@ -363,11 +377,6 @@ Connection.prototype._write = function(data, enc, callback) {
 
   if (this._utpState.closed) return
   if (this._connecting) return this._writeOnce('connect', data, enc, callback);
-
-  if (!callback._dontTrack) {
-    callback = this._trackDelivery(data, callback)
-    callback._dontTrack = true
-  }
 
   while (this._writable()) {
     var payload = this._payload(data);
