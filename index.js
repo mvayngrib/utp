@@ -459,7 +459,12 @@ Connection.prototype._recvAck = function(ack) {
   if (!this._inflightPackets) this.emit('flush');
 };
 
+Connection.prototype._millisSinceLastReceived = function () {
+  return Date.now() - (this._lastReceivedTimestamp || 0)
+}
+
 Connection.prototype._recvIncoming = function(packet) {
+  this._lastReceivedTimestamp = Date.now()
   if ('_idleTimeout' in this) {
     this.setTimeout(this._idleTimeoutMillis)
   }
