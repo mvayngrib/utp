@@ -1,5 +1,5 @@
 {
-  "name": "utp",
+  "name": "@tradle/utp",
   "version": "0.0.8",
   "repository": "git://github.com/mafintosh/utp",
   "description": "utp (micro transport protocol) implementation in node",
